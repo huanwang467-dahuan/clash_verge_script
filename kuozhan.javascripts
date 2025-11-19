@@ -1,0 +1,108 @@
+// ================= 配置区域 =================
+const CONFIG = {
+    // 测速地址：建议用 Google 或 Cloudflare，响应最快最准
+    testUrl: "http://www.gstatic.com/generate_204",
+    
+    // 核心策略：容差 150ms
+    // 只有当 (当前延迟 - 新节点延迟) > 150ms 时才切换
+    // 效果：当前不卡(<=150ms)时绝对不换，卡了(>150ms)才去找快的
+    tolerance: 150,
+    
+    // 测速间隔：5分钟 (300秒)
+    // 配合 lazy: true，平时不测，省电省流。
+    interval: 60,
+    
+    // 测速超时
+    timeout: 2000,
+
+    // 过滤关键词（正则）：排除台湾相关节点
+    // 覆盖：TW, Taiwan, ROC, Taipei, Kaohsiung, 这里的正则不仅过滤列表，还过滤 Provider
+    filterRegex: "(?i)(Taiwan|TW|CN-TW|ROC|Taipei|Kaohsiung|Hualien|Isle|台湾|臺|台北|高雄|花莲)"
+};
+
+// ================= 主逻辑 =================
+function main(config) {
+    try {
+        if (!config || typeof config !== 'object') return config;
+
+        console.log("开始执行智能配置优化...");
+
+        // 1. 准备过滤正则
+        // 生成反向正则：^(?!.*(Taiwan|TW...)) 表示“不包含这些词”
+        // 用于 proxy-groups 的 filter 字段
+        const excludeRegStr = `^(?!.*${CONFIG.filterRegex}).*`;
+
+        // 2. 处理 Proxy Groups (策略组)
+        if (config["proxy-groups"] && Array.isArray(config["proxy-groups"])) {
+            config["proxy-groups"] = config["proxy-groups"].map(group => {
+                return optimizeGroup(group, excludeRegStr);
+            });
+        }
+
+        // 3. (可选) 处理顶层的 proxies 列表，虽然有了 group filter 可以不处理，但为了干净，顺手处理掉
+        if (config.proxies && Array.isArray(config.proxies)) {
+            const regex = new RegExp(CONFIG.filterRegex);
+            config.proxies = config.proxies.filter(p => !regex.test(p.name));
+        }
+
+        console.log(`优化完成：启用 150ms 容差策略，已过滤台湾节点。`);
+        return config;
+
+    } catch (e) {
+        console.error("脚本执行异常，已回退原始配置:", e);
+        return config;
+    }
+}
+
+/**
+ * 优化单个策略组
+ */
+function optimizeGroup(group, filterString) {
+    // 只针对 url-test (自动选择) 和 fallback (故障转移) 进行深度优化
+    // select (手动选择) 也可以加 filter，但不强制加 tolerance
+    
+    const isAutoGroup = group.type === "url-test" || group.type === "fallback";
+
+    // 1. 基础属性覆盖
+    let newGroup = {
+        ...group,
+        // 如果是自动测速组，应用我们的强力参数
+        ...(isAutoGroup && {
+            url: CONFIG.testUrl,
+            interval: CONFIG.interval,
+            tolerance: CONFIG.tolerance,
+            timeout: CONFIG.timeout,
+            lazy: true,           // 开启懒加载，非常重要，省性能
+            "disable-udp": false  // 开启 UDP 支持
+        })
+    };
+
+    // 2. 【关键】应用过滤器 (Filter)
+    // 这会让 Clash 内核在读取 proxy-providers 时自动剔除台湾节点
+    // 如果组原本就有 filter，我们需要小心不要覆盖坏了，这里采取“且”逻辑稍微复杂，
+    // 为了脚本稳定性，我们直接覆盖或追加。通常机场配置自带的 filter 很少。
+    if (group.use && group.use.length > 0) { // 只有引用了 Provider 的组才需要 filter 属性
+        if (newGroup.filter) {
+            // 如果原本有 filter，尝试合并（简单处理：直接用我们的，因为你的需求是强制剔除）
+            // console.log(`组 ${group.name} 原有 filter 被覆盖`); 
+        }
+        newGroup.filter = filterString;
+    }
+
+    // 3. 清理 proxies 列表中的台湾节点 (针对直接写在 proxies: [] 里的节点)
+    if (newGroup.proxies && Array.isArray(newGroup.proxies)) {
+        const regex = new RegExp(CONFIG.filterRegex);
+        const filteredProxies = newGroup.proxies.filter(name => {
+             // 保留内置策略
+            if (["DIRECT", "REJECT", "NO-MATCH", "PASS"].includes(name)) return true;
+            return !regex.test(name);
+        });
+        
+        // 防止过滤后该组为空（比如全都是台湾节点），如果为空则回退
+        if (filteredProxies.length > 0) {
+            newGroup.proxies = filteredProxies;
+        }
+    }
+
+    return newGroup;
+}
