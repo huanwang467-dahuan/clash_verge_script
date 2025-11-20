@@ -1,19 +1,20 @@
 // ================= 配置区域 =================
 const CONFIG = {
-    // 测速地址：使用兼容性好的 http 地址
+    // 测速地址
     testUrl: "http://www.gstatic.com/generate_204",
     
-    // 只有当 (当前延迟 - 新节点延迟) > 150ms 时才切换
-    tolerance: 150,
+    // 【核心修正】
+    // 这里的数值计算方式：目标切换延迟(120ms) - 预期最低延迟(约40ms) = 80ms
+    // 含义：只有当当前节点比最快节点慢 80ms 以上时，才会触发切换
+    tolerance: 80,
     
-    // 测速间隔：300秒 (5分钟)
+    // 测速间隔：300秒 (建议设长一点，避免频繁测速导致节点断流)
     interval: 300, 
     
     // 测速超时
     timeout: 2000,
 
     // 过滤关键词（正则内容）：排除台湾相关节点
-    // 注意：这里只写核心关键词，不要带 (?i)，脚本会自动处理大小写
     filterKeywords: "Taiwan|TW|CN-TW|ROC|Taipei|Kaohsiung|Hualien|Isle|台湾|臺|台北|高雄|花莲"
 };
 
@@ -23,15 +24,9 @@ function main(config) {
         if (!config || typeof config !== 'object') return config;
         
         console.log("⚡️ 开始执行智能配置优化...");
-        const startTime = Date.now();
 
-        // 1. 预编译正则 (性能优化核心)
-        // JS 使用的正则对象 (用于处理 proxies 列表)
+        // 1. 预编译正则
         const jsFilterRegex = new RegExp(CONFIG.filterKeywords, 'i');
-        
-        // Clash 使用的过滤字符串 (用于处理 provider 筛选)
-        // 生成反向正则：^(?!.*(Taiwan|...)) 表示“不包含这些词”
-        // Go正则引擎支持 (?i) 前缀来实现不区分大小写
         const clashFilterStr = `^(?i)(?!.*(${CONFIG.filterKeywords})).*`;
 
         // 2. 优化 Proxy Groups
@@ -46,66 +41,62 @@ function main(config) {
             config.proxies = config.proxies.filter(p => !jsFilterRegex.test(p.name));
         }
 
-        console.log(`✅ 优化完成，耗时 ${Date.now() - startTime}ms`);
         return config;
 
     } catch (e) {
-        console.error("❌ 脚本执行异常，已回退原始配置:", e);
+        console.error("❌ 脚本执行异常:", e);
         return config;
     }
 }
 
 /**
  * 优化单个策略组
- * @param {object} group 策略组对象
- * @param {RegExp} jsRegex 预编译好的JS正则
- * @param {string} clashFilterStr Clash使用的过滤字符串
  */
 function optimizeGroup(group, jsRegex, clashFilterStr) {
-    // 1. 识别组类型
-    const isAutoGroup = group.type === "url-test" || group.type === "fallback";
-    const isSelectGroup = group.type === "select";
+    // 识别是否为手动选择组
+    const isSelect = group.type === 'select';
+    // 识别特殊组（中继、负载均衡通常不动）
+    const isSpecial = group.type === 'relay' || group.type === 'load-balance';
 
-    // 浅拷贝对象，避免修改原始引用带来的副作用
     let newGroup = { ...group };
 
-    // 2. 注入测速参数 (仅针对自动组)
-    if (isAutoGroup) {
+    // ============================================================
+    // 策略 1: 强制将非手动组转换为 url-test 并应用容差逻辑
+    // ============================================================
+    if (!isSelect && !isSpecial) {
+        // 强制改为 url-test，因为 fallback 无法实现基于延迟的切换
+        newGroup.type = "url-test";
+        
         newGroup.url = CONFIG.testUrl;
         newGroup.interval = CONFIG.interval;
-        newGroup.tolerance = CONFIG.tolerance;
         newGroup.timeout = CONFIG.timeout;
         newGroup.lazy = true;
-        newGroup["disable-udp"] = false;
+        
+        // 【关键修正】使用 tolerance 实现近似 120ms 切换
+        newGroup.tolerance = CONFIG.tolerance;
     }
 
-    // 3. 应用 Provider 过滤器 (Filter)
-    // 如果该组使用了 use (proxy-provider)，则注入 filter 属性
+    // ============================================================
+    // 策略 2: 过滤台湾节点
+    // ============================================================
+    
+    // 1. 处理 use (Provider 引用)
     if (newGroup.use && newGroup.use.length > 0) {
-        // 策略：为了稳定性，如果原组没有 filter，我们加上。
-        // 如果原组已经有 filter，强行修改可能会破坏机场原有的分组逻辑（如 "Netflix专线"）。
-        // 但鉴于你的需求是“排除台湾”，我们选择在自动组强制应用，在手动组谨慎处理。
-        
-        if (isAutoGroup || !newGroup.filter) {
+        // 只要是自动测速组，必须强制覆盖 filter 以排除台湾
+        if (newGroup.type === "url-test") {
              newGroup.filter = clashFilterStr;
         }
     }
 
-    // 4. 清理 proxies 列表 (针对手写的 proxies)
+    // 2. 处理 proxies (手写节点列表)
     if (newGroup.proxies && Array.isArray(newGroup.proxies)) {
-        const originalLength = newGroup.proxies.length;
-        
-        const filteredProxies = newGroup.proxies.filter(name => {
-            // 始终保留内置策略
+        const originalProxies = newGroup.proxies;
+        const filteredProxies = originalProxies.filter(name => {
             if (["DIRECT", "REJECT", "NO-MATCH", "PASS"].includes(name)) return true;
-            // 使用预编译正则测试
             return !jsRegex.test(name);
         });
 
-        // 【稳定性保护】: 如果过滤后数组为空，Clash 会报错。
-        // 必须回退或补位。
-        if (filteredProxies.length === 0 && originalLength > 0) {
-            // 如果全被删光了，加入 REJECT 或 DIRECT 占位，防止报错
+        if (filteredProxies.length === 0 && originalProxies.length > 0) {
             newGroup.proxies = ["DIRECT"]; 
         } else {
             newGroup.proxies = filteredProxies;
