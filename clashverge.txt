@@ -1,5 +1,4 @@
-// Clash Verge 修复版优化脚本 (v2.1)
-// 修复了开启 respect-rules 后缺少 proxy-server-nameserver 导致的报错
+// Clash Verge 修复版 v3.0 (修复 Unity 国际版访问与下载)
 
 function main(config) {
   // ====================
@@ -12,19 +11,19 @@ function main(config) {
   config['allow-lan'] = true;
   config['global-client-fingerprint'] = 'chrome';
   
-  // 保持节点选择
   if (!config['profile']) config['profile'] = {};
   config['profile']['store-selected'] = true;
-  
-  // 连接保活
   config['keep-alive-interval'] = 15;
   config['find-process-mode'] = 'strict';
 
   // ====================
-  // 2. 策略组容差与懒加载
+  // 2. 策略组优化
   // ====================
   const myTolerance = 50;
-  
+  // 自动获取第一个策略组的名称（通常是“节点选择”或“Proxy”）
+  // 用于后续将 Unity 流量强行指向这个组
+  const mainProxyGroup = config['proxy-groups'] && config['proxy-groups'][0] ? config['proxy-groups'][0].name : 'Proxy';
+
   if (config['proxy-groups'] && Array.isArray(config['proxy-groups'])) {
     config['proxy-groups'].forEach(group => {
       group['lazy'] = true;
@@ -37,7 +36,27 @@ function main(config) {
   }
 
   // ====================
-  // 3. DNS 优化 (修复报错部分)
+  // 3. 暴力注入 Unity 规则 (核心修复)
+  // ====================
+  // 将 Unity 流量强制指向第一个策略组，并不使用 DIRECT
+  const unityRules = [
+    `DOMAIN-SUFFIX,unity.com,${mainProxyGroup}`,
+    `DOMAIN-SUFFIX,unity3d.com,${mainProxyGroup}`,
+    `DOMAIN-SUFFIX,unity3d.io,${mainProxyGroup}`,
+    `DOMAIN-SUFFIX,packages.unity.com,${mainProxyGroup}`, // 国际版包管理器
+    `DOMAIN-SUFFIX,download.unity3d.com,${mainProxyGroup}`, // 国际版下载
+    `DOMAIN-SUFFIX,public-cdn.cloud.unity3d.com,${mainProxyGroup}`, // 云资源
+    `PROCESS-NAME,Unity Hub.exe,${mainProxyGroup}`, // 强制 Hub 进程走代理
+    `PROCESS-NAME,Unity.exe,${mainProxyGroup}`
+  ];
+
+  // 将自定义规则插入到规则列表的最前面 (unshift)，确保优先级最高
+  if (!config['rules']) config['rules'] = [];
+  config['rules'].unshift(...unityRules);
+
+
+  // ====================
+  // 4. DNS 优化 (配合规则)
   // ====================
   const dnsConfig = {
     "enable": true,
@@ -45,14 +64,12 @@ function main(config) {
     "ipv6": false,
     "use-hosts": true,
     
-    // --- 关键修复点开始 ---
-    // 开启 respect-rules 必须同时配置 proxy-server-nameserver
+    // 开启 respect-rules，让上面的规则生效，不进行本地 DNS 解析
     "respect-rules": true, 
     "proxy-server-nameserver": [
       "https://dns.alidns.com/dns-query",
       "https://doh.pub/dns-query"
     ],
-    // --- 关键修复点结束 ---
 
     "enhanced-mode": "fake-ip",
     "fake-ip-range": "198.18.0.1/16",
@@ -61,9 +78,7 @@ function main(config) {
       "msftconnecttest.com", "msftncsi.com",
       "stun.*",
       "games.qq.com", "*.games.qq.com",
-      "*.srv.nintendo.net",
-      "*.steamcontent.com",
-      "*.xboxlive.com"
+      // 注意：这里绝对不能把 unity 加入 filter
     ],
     "default-nameserver": [
       "223.5.5.5",
@@ -88,7 +103,7 @@ function main(config) {
   config['dns'] = dnsConfig;
 
   // ====================
-  // 4. 流量嗅探
+  // 5. 流量嗅探
   // ====================
   config['sniffer'] = {
     "enable": true,
@@ -103,13 +118,10 @@ function main(config) {
   };
 
   // ====================
-  // 5. Tun 模式
+  // 6. Tun 模式
   // ====================
   if (!config['tun']) config['tun'] = {};
-  
-  // 建议：如果在 Windows 上遇到网卡报错，请将 'mixed' 改回 'system'
   config['tun']['stack'] = 'mixed'; 
-  
   config['tun']['auto-route'] = true;
   config['tun']['auto-detect-interface'] = true;
   config['tun']['mtu'] = 9000; 
