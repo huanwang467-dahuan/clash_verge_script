@@ -1,0 +1,119 @@
+// Clash Verge 修复版优化脚本 (v2.1)
+// 修复了开启 respect-rules 后缺少 proxy-server-nameserver 导致的报错
+
+function main(config) {
+  // ====================
+  // 1. 核心基础设置
+  // ====================
+  config['tcp-concurrent'] = true;
+  config['unified-delay'] = true;
+  config['ipv6'] = false;
+  config['log-level'] = 'info';
+  config['allow-lan'] = true;
+  config['global-client-fingerprint'] = 'chrome';
+  
+  // 保持节点选择
+  if (!config['profile']) config['profile'] = {};
+  config['profile']['store-selected'] = true;
+  
+  // 连接保活
+  config['keep-alive-interval'] = 15;
+  config['find-process-mode'] = 'strict';
+
+  // ====================
+  // 2. 策略组容差与懒加载
+  // ====================
+  const myTolerance = 50;
+  
+  if (config['proxy-groups'] && Array.isArray(config['proxy-groups'])) {
+    config['proxy-groups'].forEach(group => {
+      group['lazy'] = true;
+      if (['url-test', 'fallback'].includes(group.type)) {
+        group['tolerance'] = myTolerance;
+        group['url'] = 'http://www.gstatic.com/generate_204';
+        group['interval'] = 300;
+      }
+    });
+  }
+
+  // ====================
+  // 3. DNS 优化 (修复报错部分)
+  // ====================
+  const dnsConfig = {
+    "enable": true,
+    "listen": "0.0.0.0:1053",
+    "ipv6": false,
+    "use-hosts": true,
+    
+    // --- 关键修复点开始 ---
+    // 开启 respect-rules 必须同时配置 proxy-server-nameserver
+    "respect-rules": true, 
+    "proxy-server-nameserver": [
+      "https://dns.alidns.com/dns-query",
+      "https://doh.pub/dns-query"
+    ],
+    // --- 关键修复点结束 ---
+
+    "enhanced-mode": "fake-ip",
+    "fake-ip-range": "198.18.0.1/16",
+    "fake-ip-filter": [
+      "*.lan", "*.local",
+      "msftconnecttest.com", "msftncsi.com",
+      "stun.*",
+      "games.qq.com", "*.games.qq.com",
+      "*.srv.nintendo.net",
+      "*.steamcontent.com",
+      "*.xboxlive.com"
+    ],
+    "default-nameserver": [
+      "223.5.5.5",
+      "119.29.29.29"
+    ],
+    "nameserver": [
+      "223.5.5.5",
+      "https://dns.alidns.com/dns-query",
+      "https://doh.pub/dns-query"
+    ],
+    "fallback": [
+      "https://1.1.1.1/dns-query",
+      "https://8.8.8.8/dns-query",
+      "tls://8.8.4.4:853"
+    ],
+    "fallback-filter": {
+      "geoip": true,
+      "geoip-code": "CN",
+      "ipcidr": ["240.0.0.0/4", "0.0.0.0/32"]
+    }
+  };
+  config['dns'] = dnsConfig;
+
+  // ====================
+  // 4. 流量嗅探
+  // ====================
+  config['sniffer'] = {
+    "enable": true,
+    "force-dns-mapping": true,
+    "parse-pure-ip": true,
+    "override-destination": true,
+    "sniff": {
+      "tls": { "ports": [443, 8443] },
+      "http": { "ports": [80, 8080, 8888], "override-destination": true },
+      "quic": { "ports": [443, 8443] }
+    }
+  };
+
+  // ====================
+  // 5. Tun 模式
+  // ====================
+  if (!config['tun']) config['tun'] = {};
+  
+  // 建议：如果在 Windows 上遇到网卡报错，请将 'mixed' 改回 'system'
+  config['tun']['stack'] = 'mixed'; 
+  
+  config['tun']['auto-route'] = true;
+  config['tun']['auto-detect-interface'] = true;
+  config['tun']['mtu'] = 9000; 
+  config['tun']['dns-hijack'] = ['any:53'];
+
+  return config;
+}
