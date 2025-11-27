@@ -1,4 +1,3 @@
-// Clash Verge 极速修复版 v3.2.3（修复PRIVATE规则格式错误）
 function main(config) {
   // ====================
   // 1. 核心性能优化（增强版）
