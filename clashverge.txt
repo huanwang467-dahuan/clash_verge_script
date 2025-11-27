@@ -1,131 +1,48 @@
 function main(config) {
   // ====================
-  // 1. 核心性能优化（增强版）
+  // 1. 基础性能配置
   // ====================
-  config['tcp-concurrent'] = true;
-  config['tcp-concurrent-max'] = 150;
-  config['unified-delay'] = true;
-  config['ipv6'] = false;
   config['log-level'] = 'warn';
   config['allow-lan'] = true;
-
-  config['keep-alive-interval'] = 15;
-  config['tcp-fast-open'] = true;
-  config['max-open-files'] = 65535;
-  config['find-process-mode'] = 'strict';
-  config['global-client-fingerprint'] = 'chrome';
-
   config['udp-relay'] = true;
-  config['udp-relay-mode'] = 'native';
-  config['udp-timeout'] = 30;
-
-  config['tls-version'] = '1.3';
-
-  config['experimental'] = {
-    sniff_tls_sni: true,
-    http2: true,
-    quic: true,
-    reuse_port: true
-  };
-
-  if (!config['profile']) config['profile'] = {};
-  config['profile']['store-selected'] = true;
-  config['profile']['cache-file'] = true;
+  config['ipv6'] = false;
 
   // ====================
-  // 2. 策略组优化（更灵敏）
+  // 2. 策略组配置
   // ====================
-  const myTolerance = 20;
-  const mainProxyGroup =
-    config['proxy-groups'] && config['proxy-groups'][0]
-      ? config['proxy-groups'][0].name
+  const mainProxyGroup = 
+    config['proxy-groups'] && config['proxy-groups'][0] 
+      ? config['proxy-groups'][0].name 
       : 'Proxy';
 
   if (Array.isArray(config['proxy-groups'])) {
     config['proxy-groups'].forEach((group) => {
-      group['lazy'] = true;
-      group['disable-udp'] = false;
-
       if (group.type === 'url-test' || group.type === 'least-latency') {
-        group['tolerance'] = myTolerance;
         group['url'] = 'http://cp.cloudflare.com/generate_204';
         group['interval'] = 180;
-        group['health-check'] = { enable: true, interval: 30 };
-      }
-
-      if (group.type === 'fallback') {
-        group['tolerance'] = myTolerance;
-        group['url'] = 'http://cp.cloudflare.com/generate_204';
-        group['interval'] = 120;
-        group['lazy-fallback'] = true;
       }
     });
   }
 
   // ====================
-  // 3. 规则修复（包含 PRIVATE 修复）
+  // 3. 核心规则配置
   // ====================
   const unityRules = [
     `DOMAIN-SUFFIX,unity.com,${mainProxyGroup}`,
     `DOMAIN-SUFFIX,unity3d.com,${mainProxyGroup}`,
-    `DOMAIN-SUFFIX,unity3d.io,${mainProxyGroup}`,
-    `DOMAIN-SUFFIX,packages.unity.com,${mainProxyGroup}`,
-    `DOMAIN-SUFFIX,download.unity3d.com,${mainProxyGroup}`,
-    `DOMAIN-SUFFIX,public-cdn.cloud.unity3d.com,${mainProxyGroup}`,
-    `PROCESS-NAME,Unity Hub.exe,${mainProxyGroup}`,
-    `PROCESS-NAME,Unity.exe,${mainProxyGroup}`
+    `DOMAIN-SUFFIX,packages.unity.com,${mainProxyGroup}`
   ];
 
   const globalRules = [
     `GEOSITE,geolocation-!cn,${mainProxyGroup}`,
     `GEOIP,!(CN),${mainProxyGroup}`,
-    `DOMAIN-SUFFIX,github.com,${mainProxyGroup}`,
-    `DOMAIN-SUFFIX,gitlab.com,${mainProxyGroup}`,
-    `DOMAIN-SUFFIX,stackoverflow.com,${mainProxyGroup}`,
-    `DOMAIN-SUFFIX,youtube.com,${mainProxyGroup}`,
-    `DOMAIN-SUFFIX,google.com,${mainProxyGroup}`,
     `GEOSITE,cn,DIRECT`,
     `GEOIP,CN,DIRECT`,
-    `DOMAIN-SUFFIX,cn,DIRECT`,
     `GEOIP,PRIVATE,DIRECT`
   ];
 
   if (!config['rules']) config['rules'] = [];
   config['rules'] = [...unityRules, ...globalRules, ...config['rules']];
-
-  // ====================
-  // 5. Sniffer 优化
-  // ====================
-  config['sniffer'] = {
-    "enable": true,
-    "force-dns-mapping": true,
-    "parse-pure-ip": true,
-    "override-destination": true,
-    "sniff": {
-      "tls": { "ports": [443, 8443] },
-      "http": { "ports": [80, 8080], "override-destination": true },
-      "quic": { "ports": [443] }
-    }
-  };
-
-  // ====================
-  // 6. Tun 模式增强
-  // ====================
-  if (!config['tun']) config['tun'] = {};
-  config['tun']['stack'] = 'mixed';
-  config['tun']['auto-route'] = true;
-  config['tun']['auto-detect-interface'] = true;
-  config['tun']['strict-route'] = true;
-  config['tun']['mtu'] = 1480;
-  config['tun']['dns-hijack'] = ['any:53'];
-  config['tun']['enable'] = true;
-
-  // ====================
-  // 7. 超时优化
-  // ====================
-  config['connect-timeout'] = 4000;
-  config['tcp-timeout'] = 180;
-  config['udp-timeout'] = 60;
 
   return config;
 }
