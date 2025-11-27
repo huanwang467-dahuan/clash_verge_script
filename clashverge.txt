@@ -1,61 +1,70 @@
-// Clash Verge 极速修复版 v3.2.2（修复PRIVATE规则格式错误）
+// Clash Verge 极速修复版 v3.2.3（修复PRIVATE规则格式错误）
 function main(config) {
   // ====================
-  // 1. 核心性能优化（保持不变）
+  // 1. 核心性能优化（增强版）
   // ====================
   config['tcp-concurrent'] = true;
-  config['tcp-concurrent-max'] = 100;
+  config['tcp-concurrent-max'] = 150;
   config['unified-delay'] = true;
   config['ipv6'] = false;
   config['log-level'] = 'warn';
   config['allow-lan'] = true;
 
-  config['keep-alive-interval'] = 20;
+  config['keep-alive-interval'] = 15;
   config['tcp-fast-open'] = true;
   config['max-open-files'] = 65535;
   config['find-process-mode'] = 'strict';
   config['global-client-fingerprint'] = 'chrome';
 
   config['udp-relay'] = true;
-  config['udp-relay-mode'] = 'direct';
+  config['udp-relay-mode'] = 'native';
   config['udp-timeout'] = 30;
+
+  config['tls-version'] = '1.3';
+
+  config['experimental'] = {
+    sniff_tls_sni: true,
+    http2: true,
+    quic: true,
+    reuse_port: true
+  };
 
   if (!config['profile']) config['profile'] = {};
   config['profile']['store-selected'] = true;
   config['profile']['cache-file'] = true;
 
   // ====================
-  // 2. 策略组配置（保持不变）
+  // 2. 策略组优化（更灵敏）
   // ====================
-  const myTolerance = 30;
+  const myTolerance = 20;
   const mainProxyGroup =
     config['proxy-groups'] && config['proxy-groups'][0]
       ? config['proxy-groups'][0].name
       : 'Proxy';
 
-  if (config['proxy-groups'] && Array.isArray(config['proxy-groups'])) {
+  if (Array.isArray(config['proxy-groups'])) {
     config['proxy-groups'].forEach((group) => {
       group['lazy'] = true;
       group['disable-udp'] = false;
-      
+
       if (group.type === 'url-test' || group.type === 'least-latency') {
         group['tolerance'] = myTolerance;
         group['url'] = 'http://cp.cloudflare.com/generate_204';
-        group['interval'] = 240;
-        group['health-check'] = { enable: true, interval: 60 };
+        group['interval'] = 180;
+        group['health-check'] = { enable: true, interval: 30 };
       }
 
       if (group.type === 'fallback') {
         group['tolerance'] = myTolerance;
         group['url'] = 'http://cp.cloudflare.com/generate_204';
-        group['interval'] = 180;
+        group['interval'] = 120;
         group['lazy-fallback'] = true;
       }
     });
   }
 
   // ====================
-  // 3. 规则修复（关键：PRIVATE规则改写成GEOIP,PRIVATE）
+  // 3. 规则修复（包含 PRIVATE 修复）
   // ====================
   const unityRules = [
     `DOMAIN-SUFFIX,unity.com,${mainProxyGroup}`,
@@ -65,7 +74,7 @@ function main(config) {
     `DOMAIN-SUFFIX,download.unity3d.com,${mainProxyGroup}`,
     `DOMAIN-SUFFIX,public-cdn.cloud.unity3d.com,${mainProxyGroup}`,
     `PROCESS-NAME,Unity Hub.exe,${mainProxyGroup}`,
-    `PROCESS-NAME,Unity.exe,${mainProxyGroup}`,
+    `PROCESS-NAME,Unity.exe,${mainProxyGroup}`
   ];
 
   const globalRules = [
@@ -79,15 +88,14 @@ function main(config) {
     `GEOSITE,cn,DIRECT`,
     `GEOIP,CN,DIRECT`,
     `DOMAIN-SUFFIX,cn,DIRECT`,
-    // 修复点：将PRIVATE,DIRECT改为GEOIP,PRIVATE,DIRECT（Clash标准格式）
-    `GEOIP,PRIVATE,DIRECT`,
+    `GEOIP,PRIVATE,DIRECT`
   ];
 
   if (!config['rules']) config['rules'] = [];
   config['rules'] = [...unityRules, ...globalRules, ...config['rules']];
 
   // ====================
-  // 4. DNS/嗅探/Tun配置（保持不变）
+  // 4. DNS 优化（已修复 proxy-server-nameserver 报错）
   // ====================
   const dnsConfig = {
     "enable": true,
@@ -96,24 +104,36 @@ function main(config) {
     "use-hosts": true,
     "respect-rules": true,
     "dns-cache": true,
-    "dns-cache-expire": 3600,
-    "dns-cache-size": 10000,
+    "dns-cache-expire": 4000,
+    "dns-cache-size": 20000,
     "enhanced-mode": "fake-ip",
     "fake-ip-range": "198.18.0.1/16",
-    "default-nameserver": ["223.5.5.5", "119.29.29.29", "180.76.76.76"],
+
+    // 国内 DNS
+    "default-nameserver": [
+      "223.5.5.5",
+      "119.29.29.29"
+    ],
+
+    // 国外 DoH
     "nameserver": [
       "https://dns.cloudflare.com/dns-query",
       "https://dns.google/dns-query"
     ],
+
+    // fallback
     "fallback": [
       "https://1.1.1.1/dns-query",
       "https://8.8.8.8/dns-query"
     ],
+
     "fallback-filter": {
       "geoip": true,
       "geoip-code": "CN",
-      "ipcidr": ["240.0.0.0/4", "0.0.0.0/32", "10.0.0.0/8"]
+      "ipcidr": ["240.0.0.0/4"]
     },
+
+    // 国内站点优先真实 IP
     "nameserver-policy": {
       "geosite:cn,private": ["223.5.5.5", "119.29.29.29"],
       "geosite:geolocation-!cn": [
@@ -121,20 +141,30 @@ function main(config) {
         "https://dns.google/dns-query"
       ]
     },
+
+    // ★★ 修复报错（不能使用 DoH，必须用纯 IP）
     "proxy-server-nameserver": [
-      "https://dns.cloudflare.com/dns-query",
-      "https://dns.google/dns-query"
+      "1.1.1.1",
+      "8.8.8.8"
     ],
+
     "fake-ip-filter": [
       "*.lan",
       "*.local",
-      "msftconnecttest.com",
       "*.cn",
-      "*.qq.com"
+      "*.qq.com",
+      "*.weixin.qq.com",
+      "*.aliyun.com",
+      "localhost",
+      "router.*",
+      "msftconnecttest.com"
     ]
   };
   config['dns'] = dnsConfig;
 
+  // ====================
+  // 5. Sniffer 优化
+  // ====================
   config['sniffer'] = {
     "enable": true,
     "force-dns-mapping": true,
@@ -147,6 +177,9 @@ function main(config) {
     }
   };
 
+  // ====================
+  // 6. Tun 模式增强
+  // ====================
   if (!config['tun']) config['tun'] = {};
   config['tun']['stack'] = 'mixed';
   config['tun']['auto-route'] = true;
@@ -154,9 +187,13 @@ function main(config) {
   config['tun']['strict-route'] = true;
   config['tun']['mtu'] = 1480;
   config['tun']['dns-hijack'] = ['any:53'];
+  config['tun']['enable'] = true;
 
-  config['connect-timeout'] = 5000;
-  config['tcp-timeout'] = 300;
+  // ====================
+  // 7. 超时优化
+  // ====================
+  config['connect-timeout'] = 4000;
+  config['tcp-timeout'] = 180;
   config['udp-timeout'] = 60;
 
   return config;
