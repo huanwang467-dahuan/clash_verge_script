@@ -1,0 +1,35 @@
+// Clash Verge 全局扩展脚本
+function main(config) {
+  // 1. 定义你想使用的代理组名称 (请检查你的代理界面，替换为实际的组名，如 "🚀 节点选择" 或 "Proxy")
+  const proxyGroupName = "Proxy"; 
+
+  // 2. 定义 Unity 相关的规则
+  const unityRules = [
+    // 强制 Unity 常用域名走代理
+    `DOMAIN-SUFFIX,unity.com,${proxyGroupName}`,
+    `DOMAIN-SUFFIX,unity3d.com,${proxyGroupName}`,
+    `DOMAIN-SUFFIX,unitychina.cn,${proxyGroupName}`, // Unity 中国特供版
+    `DOMAIN-SUFFIX,packages.unity.com,${proxyGroupName}`,
+    `DOMAIN-SUFFIX,assetstore.unity.com,${proxyGroupName}`,
+    `DOMAIN-SUFFIX,api.unity.com,${proxyGroupName}`,
+    `DOMAIN-SUFFIX,license.unity3d.com,${proxyGroupName}`,
+    `DOMAIN-SUFFIX,cloud.unity3d.com,${proxyGroupName}`,
+    `DOMAIN-SUFFIX,plasticscm.com,${proxyGroupName}`, // 版本控制 Plastic SCM
+    `DOMAIN-SUFFIX,gradle.org,${proxyGroupName}`,    // 安卓构建可能需要
+    
+    // 强制 Unity 进程走代理 (Clash Meta 内核支持，防止域名漏网)
+    `PROCESS-NAME,Unity Hub.exe,${proxyGroupName}`,
+    `PROCESS-NAME,Unity.exe,${proxyGroupName}`,
+    `PROCESS-NAME,UnityPackageManager.exe,${proxyGroupName}`
+  ];
+
+  // 3. 将规则插入到配置文件的最前面 (unshift)
+  // 这样可以确保 Unity 的规则优先于原本订阅中的漏网规则
+  if (!config.rules) {
+    config.rules = [];
+  }
+  config.rules.unshift(...unityRules);
+
+  // 4. 返回修改后的配置
+  return config;
+}
